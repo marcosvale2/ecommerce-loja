@@ -36,73 +36,61 @@ const upload = multer({ storage });
 // ====================== BANCO DE DADOS ======================
 const db = new Database("./database.sqlite");
 
-db.serialize(() => {
-  db.run(`
-    CREATE TABLE IF NOT EXISTS users (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      name TEXT NOT NULL,
-      email TEXT UNIQUE NOT NULL,
-      password TEXT NOT NULL,
-      role TEXT NOT NULL DEFAULT 'customer'
-    )
-  `);
-
-  db.run(`
-    CREATE TABLE IF NOT EXISTS products (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      name TEXT NOT NULL,
-      description TEXT,
-      price REAL NOT NULL,
-      stock INTEGER NOT NULL DEFAULT 0,
-      image_url TEXT,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    )
-  `);
-
-  // >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-  // ATUALIZADA: agora tem display_number e order_date
-  // >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-  db.run(`
-    CREATE TABLE IF NOT EXISTS orders (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      user_id INTEGER,
-      total_price REAL NOT NULL,
-      status TEXT NOT NULL DEFAULT 'pending',
-      display_number INTEGER,
-      order_date TEXT,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (user_id) REFERENCES users(id)
-    )
-  `);
-
-  db.run(`
-    CREATE TABLE IF NOT EXISTS order_items (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      order_id INTEGER,
-      product_id INTEGER,
-      quantity INTEGER NOT NULL,
-      unit_price REAL NOT NULL,
-      FOREIGN KEY (order_id) REFERENCES orders(id),
-      FOREIGN KEY (product_id) REFERENCES products(id)
-    )
-  `);
-
-  // ADMIN PADRÃO
-  db.get(
-    "SELECT * FROM users WHERE email = ?",
-    ["admin@loja.com"],
-    (err, row) => {
-      if (!row) {
-        const hash = bcrypt.hashSync("admin123", 10);
-        db.run(
-          "INSERT INTO users (name, email, password, role) VALUES (?, ?, ?, ?)",
-          ["Admin", "admin@loja.com", hash, "admin"]
-        );
-        console.log("Admin criado: admin@loja.com / admin123");
-      }
-    }
+// Criação de tabelas (better-sqlite3 é síncrono)
+db.exec(`
+  CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    email TEXT UNIQUE NOT NULL,
+    password TEXT NOT NULL,
+    role TEXT NOT NULL DEFAULT 'customer'
   );
-});
+
+  CREATE TABLE IF NOT EXISTS products (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    description TEXT,
+    price REAL NOT NULL,
+    stock INTEGER NOT NULL DEFAULT 0,
+    image_url TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE TABLE IF NOT EXISTS orders (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER,
+    total_price REAL NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    display_number INTEGER,
+    order_date TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id)
+  );
+
+  CREATE TABLE IF NOT EXISTS order_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    order_id INTEGER,
+    product_id INTEGER,
+    quantity INTEGER NOT NULL,
+    unit_price REAL NOT NULL,
+    FOREIGN KEY (order_id) REFERENCES orders(id),
+    FOREIGN KEY (product_id) REFERENCES products(id)
+  );
+`);
+
+// Criar admin padrão
+const adminExists = db
+  .prepare("SELECT * FROM users WHERE email = ?")
+  .get("admin@loja.com");
+
+if (!adminExists) {
+  const hash = bcrypt.hashSync("admin123", 10);
+  db.prepare(
+    "INSERT INTO users (name, email, password, role) VALUES (?, ?, ?, ?)"
+  ).run("Admin", "admin@loja.com", hash, "admin");
+
+  console.log("Admin criado: admin@loja.com / admin123");
+}
 
 // ====================== MIDDLEWARE AUTH ======================
 function authMiddleware(req, res, next) {
@@ -135,7 +123,10 @@ app.post(
       return res.status(400).json({ message: "Nenhum arquivo enviado" });
     }
 
-    const imageUrl = `http://localhost:${PORT}/uploads/${req.file.filename}`;
+    const imageUrl = `https://${
+      process.env.RENDER_EXTERNAL_HOST || "localhost"
+    }:${PORT}/uploads/${req.file.filename}`;
+
     res.json({ url: imageUrl });
   }
 );
@@ -144,22 +135,21 @@ app.post(
 app.post("/api/auth/login", (req, res) => {
   const { email, password } = req.body;
 
-  db.get("SELECT * FROM users WHERE email = ?", [email], (err, user) => {
-    if (!user) return res.status(400).json({ message: "Usuário não encontrado" });
+  const user = db.prepare("SELECT * FROM users WHERE email = ?").get(email);
+  if (!user) return res.status(400).json({ message: "Usuário não encontrado" });
 
-    const valid = bcrypt.compareSync(password, user.password);
-    if (!valid) return res.status(400).json({ message: "Senha incorreta" });
+  const valid = bcrypt.compareSync(password, user.password);
+  if (!valid) return res.status(400).json({ message: "Senha incorreta" });
 
-    const token = jwt.sign(
-      { id: user.id, role: user.role, name: user.name },
-      JWT_SECRET,
-      { expiresIn: "8h" }
-    );
+  const token = jwt.sign(
+    { id: user.id, role: user.role, name: user.name },
+    JWT_SECRET,
+    { expiresIn: "8h" }
+  );
 
-    res.json({
-      token,
-      user: { id: user.id, name: user.name, email: user.email, role: user.role },
-    });
+  res.json({
+    token,
+    user: { id: user.id, name: user.name, email: user.email, role: user.role },
   });
 });
 
@@ -168,98 +158,83 @@ app.post("/api/auth/register", (req, res) => {
   const { name, email, password } = req.body;
   const hash = bcrypt.hashSync(password, 10);
 
-  db.run(
-    "INSERT INTO users (name, email, password, role) VALUES (?, ?, ?, 'customer')",
-    [name, email, hash],
-    function (err) {
-      if (err) return res.status(400).json({ message: "Erro ao cadastrar" });
-      res.status(201).json({ id: this.lastID, name, email });
-    }
-  );
+  try {
+    const stmt = db.prepare(
+      "INSERT INTO users (name, email, password, role) VALUES (?, ?, ?, 'customer')"
+    );
+
+    const result = stmt.run(name, email, hash);
+    res.status(201).json({ id: result.lastInsertRowid, name, email });
+  } catch (err) {
+    res.status(400).json({ message: "Erro ao cadastrar" });
+  }
 });
 
 // ====================== PRODUTOS ======================
 app.get("/api/products", (req, res) => {
-  db.all("SELECT * FROM products", (err, rows) => {
-    if (err) return res.status(500).json({ message: "Erro ao listar produtos" });
-    res.json(rows);
-  });
+  const products = db.prepare("SELECT * FROM products").all();
+  res.json(products);
 });
 
 app.post("/api/products", authMiddleware, adminMiddleware, (req, res) => {
   const { name, description, price, stock, image_url } = req.body;
 
-  db.run(
-    "INSERT INTO products (name, description, price, stock, image_url) VALUES (?, ?, ?, ?, ?)",
-    [name, description, price, stock, image_url],
-    function (err) {
-      if (err) return res.status(400).json({ message: "Erro ao criar produto" });
-      res.status(201).json({ id: this.lastID });
-    }
+  const stmt = db.prepare(
+    "INSERT INTO products (name, description, price, stock, image_url) VALUES (?, ?, ?, ?, ?)"
   );
+
+  const result = stmt.run(name, description, price, stock, image_url);
+  res.status(201).json({ id: result.lastInsertRowid });
 });
 
-// ====================== >>> PEDIDOS (ALTERADO) <<< ======================
-
-// Criar pedido com display_number
+// ====================== PEDIDOS ======================
 app.post("/api/orders", authMiddleware, (req, res) => {
   const { items, total_price } = req.body;
 
-  if (!items || !Array.isArray(items) || items.length === 0) {
+  if (!items || items.length === 0)
     return res.status(400).json({ message: "Carrinho vazio" });
-  }
 
-  const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+  const today = new Date().toISOString().slice(0, 10);
 
-  // 1) Contar pedidos do dia atual
-  db.get(
-    "SELECT COUNT(*) AS count FROM orders WHERE order_date = ?",
-    [today],
-    (err, row) => {
-      if (err) return res.status(500).json({ message: "Erro interno" });
+  const count = db
+    .prepare("SELECT COUNT(*) AS count FROM orders WHERE order_date = ?")
+    .get(today).count;
 
-      const nextDisplayNumber = row.count + 1;
+  const displayNumber = count + 1;
 
-      // 2) Criar pedido com display_number
-      db.run(
-        "INSERT INTO orders (user_id, total_price, display_number, order_date) VALUES (?, ?, ?, ?)",
-        [req.user.id, total_price, nextDisplayNumber, today],
-        function (err2) {
-          if (err2)
-            return res.status(400).json({ message: "Erro ao criar pedido" });
+  const orderResult = db
+    .prepare(
+      "INSERT INTO orders (user_id, total_price, display_number, order_date) VALUES (?, ?, ?, ?)"
+    )
+    .run(req.user.id, total_price, displayNumber, today);
 
-          const orderId = this.lastID;
+  const orderId = orderResult.lastInsertRowid;
 
-          // 3) Inserir itens
-          const stmt = db.prepare(
-            "INSERT INTO order_items (order_id, product_id, quantity, unit_price) VALUES (?, ?, ?, ?)"
-          );
-          items.forEach((item) => {
-            stmt.run(orderId, item.product_id, item.quantity, item.unit_price);
-          });
-          stmt.finalize();
-
-          // 4) Retornar display_number
-          res.json({
-            message: "Pedido criado",
-            order_id: orderId,
-            display_number: nextDisplayNumber,
-          });
-        }
-      );
-    }
+  const stmt = db.prepare(
+    "INSERT INTO order_items (order_id, product_id, quantity, unit_price) VALUES (?, ?, ?, ?)"
   );
+
+  items.forEach((item) => {
+    stmt.run(orderId, item.product_id, item.quantity, item.unit_price);
+  });
+
+  res.json({
+    message: "Pedido criado",
+    order_id: orderId,
+    display_number: displayNumber,
+  });
 });
 
 // ====================== LISTAR PEDIDOS ======================
 app.get("/api/orders/my", authMiddleware, (req, res) => {
-  db.all("SELECT * FROM orders WHERE user_id = ?", [req.user.id], (err, rows) => {
-    if (err) return res.status(500).json({ message: "Erro ao listar pedidos" });
-    res.json(rows);
-  });
+  const rows = db
+    .prepare("SELECT * FROM orders WHERE user_id = ?")
+    .all(req.user.id);
+
+  res.json(rows);
 });
 
-// ADMIN - listar pedidos completos
+// ====================== ADMIN - LISTAR COMPLETO ======================
 app.get("/api/orders/full", authMiddleware, adminMiddleware, (req, res) => {
   const sql = `
     SELECT 
@@ -283,89 +258,62 @@ app.get("/api/orders/full", authMiddleware, adminMiddleware, (req, res) => {
     ORDER BY o.created_at DESC
   `;
 
-  db.all(sql, [], (err, rows) => {
-    if (err) return res.status(500).json({ message: "Erro ao listar pedidos" });
+  const rows = db.prepare(sql).all();
 
-    const grouped = {};
+  const grouped = {};
 
-    rows.forEach((r) => {
-      if (!grouped[r.order_id]) {
-        grouped[r.order_id] = {
-          order_id: r.order_id,
-          display_number: r.display_number,
-          order_date: r.order_date,
-          total_price: r.total_price,
-          status: r.status,
-          created_at: r.created_at,
-          user: {
-            id: r.user_id,
-            name: r.user_name,
-            email: r.user_email,
-          },
-          items: [],
-        };
-      }
+  rows.forEach((r) => {
+    if (!grouped[r.order_id]) {
+      grouped[r.order_id] = {
+        order_id: r.order_id,
+        display_number: r.display_number,
+        order_date: r.order_date,
+        total_price: r.total_price,
+        status: r.status,
+        created_at: r.created_at,
+        user: {
+          id: r.user_id,
+          name: r.user_name,
+          email: r.user_email,
+        },
+        items: [],
+      };
+    }
 
-      grouped[r.order_id].items.push({
-        product_id: r.product_id,
-        product_name: r.product_name,
-        quantity: r.quantity,
-        unit_price: r.unit_price,
-      });
-    });
-
-    res.json(Object.values(grouped));
-  });
-});
-
-// ====================== DELETAR PEDIDO ======================
-app.delete("/api/orders/:id", authMiddleware, adminMiddleware, (req, res) => {
-  const orderId = req.params.id;
-
-  db.run("DELETE FROM order_items WHERE order_id = ?", [orderId], (err1) => {
-    if (err1) return res.status(500).json({ message: "Erro ao deletar itens" });
-
-    db.run("DELETE FROM orders WHERE id = ?", [orderId], (err2) => {
-      if (err2) return res.status(500).json({ message: "Erro ao deletar pedido" });
-
-      res.json({ message: "Pedido excluído com sucesso" });
+    grouped[r.order_id].items.push({
+      product_id: r.product_id,
+      product_name: r.product_name,
+      quantity: r.quantity,
+      unit_price: r.unit_price,
     });
   });
+
+  res.json(Object.values(grouped));
 });
 
-// ====================== CONFIRMAR PAGAMENTO (cliente) ======================
+// ====================== CONFIRMAR PAGAMENTO ======================
 app.post("/api/orders/:display_number/pay", authMiddleware, (req, res) => {
   const displayNumber = req.params.display_number;
-
-  // Atualiza o pedido usando DISPLAY_NUMBER + DATA DO PEDIDO (garante unicidade)
   const today = new Date().toISOString().slice(0, 10);
 
-  db.run(
-    `
+  const result = db
+    .prepare(
+      `
     UPDATE orders 
     SET status = 'paid' 
     WHERE display_number = ? AND order_date = ?
-    `,
-    [displayNumber, today],
-    function (err) {
-      if (err) {
-        console.error("Erro ao atualizar status:", err);
-        return res.status(500).json({ message: "Erro ao confirmar pagamento." });
-      }
+    `
+    )
+    .run(displayNumber, today);
 
-      if (this.changes === 0) {
-        return res.status(404).json({
-          message: "Pedido não encontrado para hoje."
-        });
-      }
+  if (result.changes === 0) {
+    return res
+      .status(404)
+      .json({ message: "Pedido não encontrado para hoje." });
+  }
 
-      res.json({ message: "Pagamento confirmado!" });
-    }
-  );
+  res.json({ message: "Pagamento confirmado!" });
 });
-
-
-
 
 // ====================== START ======================
 app.listen(PORT, () => {
