@@ -14,7 +14,7 @@
     "jsonwebtoken": "^9.0.2",
     "multer": "^2.0.2",
     "react-qrcode-logo": "^4.0.0",
-    "sqlite3": "^5.1.7"
+    "sqlite3": "^5.1.6"
   },
   "devDependencies": {
     "nodemon": "^3.1.7"
