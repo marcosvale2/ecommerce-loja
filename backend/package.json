@@ -17,6 +17,6 @@
     "react-qrcode-logo": "^4.0.0"
   },
   "devDependencies": {
-    "nodemon": "^3.1.7"
+    "nodemon": "^3.1.11"
   }
 }

@@ -1,4 +1,4 @@
-export const API_URL = "http://localhost:4000";
+export const API_URL = "https://ecommerce-loja.onrender.com";
 
 export async function apiFetch(path, options = {}) {
   const token = localStorage.getItem("token");
@@ -9,9 +9,9 @@ export async function apiFetch(path, options = {}) {
     ...options.headers
   };
 
-  const url = `${API_URL}${path}`;
+  const url = `${API_URL}/api${path}`;
 
-  console.log("REQUEST →", url); // DEBUG
+  console.log("REQUEST →", url);
 
   const res = await fetch(url, {
     ...options,
