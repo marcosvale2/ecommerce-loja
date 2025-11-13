@@ -1,6 +1,6 @@
 const express = require("express");
 const cors = require("cors");
-const sqlite3 = require("sqlite3").verbose();
+const Database = require("better-sqlite3");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const dotenv = require("dotenv");
@@ -34,7 +34,7 @@ const storage = multer.diskStorage({
 const upload = multer({ storage });
 
 // ====================== BANCO DE DADOS ======================
-const db = new sqlite3.Database("./database.sqlite");
+const db = new Database("./database.sqlite");
 
 db.serialize(() => {
   db.run(`
