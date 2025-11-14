@@ -248,13 +248,61 @@ app.post("/api/orders", authMiddleware, (req, res) => {
   });
 });
 
-// ====================== LISTAR PEDIDOS ======================
-app.get("/api/orders/my", authMiddleware, (req, res) => {
-  const rows = db
-    .prepare("SELECT * FROM orders WHERE user_id = ?")
-    .all(req.user.id);
+// ====================== ADMIN - LISTAR TODOS OS PEDIDOS COMPLETOS ======================
+app.get("/api/orders/full", authMiddleware, adminMiddleware, (req, res) => {
+  const sql = `
+    SELECT 
+      o.id AS order_id,
+      o.display_number,
+      o.order_date,
+      o.total_price,
+      o.status,
+      o.created_at,
+      u.id AS user_id,
+      u.name AS user_name,
+      u.email AS user_email,
+      oi.product_id,
+      oi.quantity,
+      oi.unit_price,
+      p.name AS product_name
+    FROM orders o
+    LEFT JOIN users u ON u.id = o.user_id
+    LEFT JOIN order_items oi ON oi.order_id = o.id
+    LEFT JOIN products p ON p.id = oi.product_id
+    ORDER BY o.created_at DESC
+  `;
 
-  res.json(rows);
+  const rows = db.prepare(sql).all();
+
+  const grouped = {};
+
+  rows.forEach((r) => {
+    if (!grouped[r.order_id]) {
+      grouped[r.order_id] = {
+        order_id: r.order_id,
+        display_number: r.display_number,
+        order_date: r.order_date,
+        total_price: r.total_price,
+        status: r.status,
+        created_at: r.created_at,
+        user: {
+          id: r.user_id,
+          name: r.user_name,
+          email: r.user_email,
+        },
+        items: []
+      };
+    }
+
+    grouped[r.order_id].items.push({
+      product_id: r.product_id,
+      product_name: r.product_name,
+      quantity: r.quantity,
+      unit_price: r.unit_price
+    });
+  });
+
+  res.json(Object.values(grouped));
 });
 
 // ====================== DELETE PEDIDO (CORRIGIDO) ======================
