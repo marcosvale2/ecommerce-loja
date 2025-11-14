@@ -12,7 +12,7 @@ dotenv.config();
 const app = express();
 app.use(
   cors({
-    origin: "*", // Pode deixar liberado por enquanto
+    origin: "*",
     methods: "GET,POST,PUT,DELETE",
     allowedHeaders: "Content-Type,Authorization",
   })
@@ -43,7 +43,7 @@ const upload = multer({ storage });
 // ====================== BANCO DE DADOS ======================
 const db = new Database("./database.sqlite");
 
-// Criação de tabelas (better-sqlite3 é síncrono)
+// Criação de tabelas
 db.exec(`
   CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -130,11 +130,7 @@ app.post(
       return res.status(400).json({ message: "Nenhum arquivo enviado" });
     }
 
-    // Usa host/protocolo da requisição -> funciona local e no Render
-    const imageUrl = `${req.protocol}://${req.get("host")}/uploads/${
-      req.file.filename
-    }`;
-
+    const imageUrl = `${req.protocol}://${req.get("host")}/uploads/${req.file.filename}`;
     res.json({ url: imageUrl });
   }
 );
@@ -193,6 +189,23 @@ app.post("/api/products", authMiddleware, adminMiddleware, (req, res) => {
 
   const result = stmt.run(name, description, price, stock, image_url);
   res.status(201).json({ id: result.lastInsertRowid });
+});
+
+// ========== 🔥 ADICIONADO — DELETAR PRODUTO ==========
+app.delete("/api/products/:id", authMiddleware, adminMiddleware, (req, res) => {
+  const id = req.params.id;
+
+  try {
+    const result = db.prepare("DELETE FROM products WHERE id = ?").run(id);
+
+    if (result.changes === 0) {
+      return res.status(404).json({ message: "Produto não encontrado" });
+    }
+
+    res.json({ message: "Produto deletado com sucesso" });
+  } catch (err) {
+    res.status(500).json({ message: "Erro ao deletar produto" });
+  }
 });
 
 // ====================== PEDIDOS ======================
@@ -297,6 +310,25 @@ app.get("/api/orders/full", authMiddleware, adminMiddleware, (req, res) => {
   });
 
   res.json(Object.values(grouped));
+});
+
+// ========== 🔥 ADICIONADO — DELETAR PEDIDO ==========
+app.delete("/api/orders/:id", authMiddleware, adminMiddleware, (req, res) => {
+  const id = req.params.id;
+
+  try {
+    db.prepare("DELETE FROM order_items WHERE order_id = ?").run(id);
+
+    const result = db.prepare("DELETE FROM orders WHERE id = ?").run(id);
+
+    if (result.changes === 0) {
+      return res.status(404).json({ message: "Pedido não encontrado" });
+    }
+
+    res.json({ message: "Pedido deletado com sucesso" });
+  } catch (err) {
+    res.status(500).json({ message: "Erro ao deletar pedido" });
+  }
 });
 
 // ====================== CONFIRMAR PAGAMENTO ======================
