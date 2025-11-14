@@ -14,7 +14,7 @@ app.use(
   cors({
     origin: "*", // Pode deixar liberado por enquanto
     methods: "GET,POST,PUT,DELETE",
-    allowedHeaders: "Content-Type,Authorization"
+    allowedHeaders: "Content-Type,Authorization",
   })
 );
 
@@ -130,9 +130,10 @@ app.post(
       return res.status(400).json({ message: "Nenhum arquivo enviado" });
     }
 
-    const imageUrl = `https://${
-      process.env.RENDER_EXTERNAL_HOST || "localhost"
-    }:${PORT}/uploads/${req.file.filename}`;
+    // Usa host/protocolo da requisição -> funciona local e no Render
+    const imageUrl = `${req.protocol}://${req.get("host")}/uploads/${
+      req.file.filename
+    }`;
 
     res.json({ url: imageUrl });
   }
