@@ -41,7 +41,7 @@ const storage = multer.diskStorage({
 const upload = multer({ storage });
 
 // ====================== BANCO DE DADOS ======================
-const db = new Database("./database.sqlite");
+const db = new Database("./database2.sqlite");
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS users (
