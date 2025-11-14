@@ -43,7 +43,6 @@ const upload = multer({ storage });
 // ====================== BANCO DE DADOS ======================
 const db = new Database("./database.sqlite");
 
-// Criação de tabelas
 db.exec(`
   CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -130,6 +129,7 @@ app.post(
       return res.status(400).json({ message: "Nenhum arquivo enviado" });
     }
 
+    // Usa host real da requisição — Render ou Local
     const imageUrl = `${req.protocol}://${req.get("host")}/uploads/${req.file.filename}`;
     res.json({ url: imageUrl });
   }
@@ -170,7 +170,7 @@ app.post("/api/auth/register", (req, res) => {
     const result = stmt.run(name, email, hash);
     res.status(201).json({ id: result.lastInsertRowid, name, email });
   } catch (err) {
-    res.status(400).json({ message: "Erro ao cadastrar" });
+    return res.status(400).json({ message: "Erro ao cadastrar" });
   }
 });
 
@@ -191,20 +191,22 @@ app.post("/api/products", authMiddleware, adminMiddleware, (req, res) => {
   res.status(201).json({ id: result.lastInsertRowid });
 });
 
-// ========== 🔥 ADICIONADO — DELETAR PRODUTO ==========
+// ====================== DELETAR PRODUTO (CORRIGIDO) ======================
 app.delete("/api/products/:id", authMiddleware, adminMiddleware, (req, res) => {
-  const id = req.params.id;
+  const { id } = req.params;
 
   try {
-    const result = db.prepare("DELETE FROM products WHERE id = ?").run(id);
+    const stmt = db.prepare("DELETE FROM products WHERE id = ?");
+    const result = stmt.run(id);
 
     if (result.changes === 0) {
       return res.status(404).json({ message: "Produto não encontrado" });
     }
 
-    res.json({ message: "Produto deletado com sucesso" });
+    return res.json({ message: "Produto deletado com sucesso" });
   } catch (err) {
-    res.status(500).json({ message: "Erro ao deletar produto" });
+    console.error("Erro ao deletar produto:", err);
+    return res.status(500).json({ message: "Erro ao deletar produto" });
   }
 });
 
@@ -255,79 +257,22 @@ app.get("/api/orders/my", authMiddleware, (req, res) => {
   res.json(rows);
 });
 
-// ====================== ADMIN - LISTAR COMPLETO ======================
-app.get("/api/orders/full", authMiddleware, adminMiddleware, (req, res) => {
-  const sql = `
-    SELECT 
-      o.id AS order_id,
-      o.display_number,
-      o.order_date,
-      o.total_price,
-      o.status,
-      o.created_at,
-      u.id AS user_id,
-      u.name AS user_name,
-      u.email AS user_email,
-      oi.product_id,
-      oi.quantity,
-      oi.unit_price,
-      p.name AS product_name
-    FROM orders o
-    LEFT JOIN users u ON u.id = o.user_id
-    LEFT JOIN order_items oi ON oi.order_id = o.id
-    LEFT JOIN products p ON p.id = oi.product_id
-    ORDER BY o.created_at DESC
-  `;
-
-  const rows = db.prepare(sql).all();
-
-  const grouped = {};
-
-  rows.forEach((r) => {
-    if (!grouped[r.order_id]) {
-      grouped[r.order_id] = {
-        order_id: r.order_id,
-        display_number: r.display_number,
-        order_date: r.order_date,
-        total_price: r.total_price,
-        status: r.status,
-        created_at: r.created_at,
-        user: {
-          id: r.user_id,
-          name: r.user_name,
-          email: r.user_email,
-        },
-        items: [],
-      };
-    }
-
-    grouped[r.order_id].items.push({
-      product_id: r.product_id,
-      product_name: r.product_name,
-      quantity: r.quantity,
-      unit_price: r.unit_price,
-    });
-  });
-
-  res.json(Object.values(grouped));
-});
-
-// ========== 🔥 ADICIONADO — DELETAR PEDIDO ==========
+// ====================== DELETE PEDIDO (CORRIGIDO) ======================
 app.delete("/api/orders/:id", authMiddleware, adminMiddleware, (req, res) => {
-  const id = req.params.id;
+  const { id } = req.params;
 
   try {
     db.prepare("DELETE FROM order_items WHERE order_id = ?").run(id);
-
     const result = db.prepare("DELETE FROM orders WHERE id = ?").run(id);
 
     if (result.changes === 0) {
       return res.status(404).json({ message: "Pedido não encontrado" });
     }
 
-    res.json({ message: "Pedido deletado com sucesso" });
+    return res.json({ message: "Pedido excluído com sucesso" });
   } catch (err) {
-    res.status(500).json({ message: "Erro ao deletar pedido" });
+    console.error("Erro ao deletar pedido:", err);
+    return res.status(500).json({ message: "Erro ao deletar pedido" });
   }
 });
 
